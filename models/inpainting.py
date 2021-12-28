@@ -11,7 +11,7 @@ from . import networks
 # losses
 from losses.L1_plus_perceptualLoss import L1_plus_perceptualLoss
 
-from .src import dp
+from .src import dp, grid_sampler
 
 import sys
 import torch.nn.functional as F
@@ -35,34 +35,38 @@ class DeformablePipe(BaseModel):
 
         input_nc = [opt.P_input_nc, opt.BP_input_nc+opt.BP_input_nc]
 
-        self.netG = networks.define_G(input_nc, opt.P_input_nc,
-                                        opt.ngf, opt.which_model_netG, opt.norm, not opt.no_dropout, opt.init_type, self.gpu_ids,
-                                        n_downsampling=opt.G_n_downsampling)
+        self.netG = dp.GatedHourglass(32, 5, 2).cuda(self.gpu_ids[0])
+        # self.refiner = dp.ResHourglassDeformableSkip(8, 10, 3, ngf=256).cuda(self.gpu_ids[0])
+        self.sampler = grid_sampler.InvGridSamplerDecomposed(return_B=True, hole_fill_color=0.).cuda(self.gpu_ids[0])
 
-        if self.isTrain:
-            use_sigmoid = opt.no_lsgan
-            if opt.with_D_PB:
-                self.netD_PB = networks.define_D(opt.P_input_nc+opt.BP_input_nc, opt.ndf,
-                                            opt.which_model_netD,
-                                            opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                            not opt.no_dropout_D,
-                                            n_downsampling = opt.D_n_downsampling)
+        # self.netG = networks.define_G(input_nc, opt.P_input_nc,
+        #                                 opt.ngf, opt.which_model_netG, opt.norm, not opt.no_dropout, opt.init_type, self.gpu_ids,
+        #                                 n_downsampling=opt.G_n_downsampling)
 
-            if opt.with_D_PP:
-                self.netD_PP = networks.define_D(opt.P_input_nc+opt.P_input_nc, opt.ndf,
-                                            opt.which_model_netD,
-                                            opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                            not opt.no_dropout_D,
-                                            n_downsampling = opt.D_n_downsampling)
+        # if self.isTrain:
+        #     use_sigmoid = opt.no_lsgan
+        #     if opt.with_D_PB:
+        #         self.netD_PB = networks.define_D(opt.P_input_nc+opt.BP_input_nc, opt.ndf,
+        #                                     opt.which_model_netD,
+        #                                     opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
+        #                                     not opt.no_dropout_D,
+        #                                     n_downsampling = opt.D_n_downsampling)
+        #
+        #     if opt.with_D_PP:
+        #         self.netD_PP = networks.define_D(opt.P_input_nc+opt.P_input_nc, opt.ndf,
+        #                                     opt.which_model_netD,
+        #                                     opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
+        #                                     not opt.no_dropout_D,
+        #                                     n_downsampling = opt.D_n_downsampling)
 
         if not self.isTrain or opt.continue_train:
             which_epoch = opt.which_epoch
             self.load_network(self.netG, 'netG', which_epoch)
-            if self.isTrain:
-                if opt.with_D_PB:
-                    self.load_network(self.netD_PB, 'netD_PB', which_epoch)
-                if opt.with_D_PP:
-                    self.load_network(self.netD_PP, 'netD_PP', which_epoch)
+            # if self.isTrain:
+            #     if opt.with_D_PB:
+            #         self.load_network(self.netD_PB, 'netD_PB', which_epoch)
+            #     if opt.with_D_PP:
+            #         self.load_network(self.netD_PP, 'netD_PP', which_epoch)
 
 
         if self.isTrain:
@@ -70,7 +74,7 @@ class DeformablePipe(BaseModel):
             self.fake_PP_pool = ImagePool(opt.pool_size)
             self.fake_PB_pool = ImagePool(opt.pool_size)
             # define loss functions
-            self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
+            # self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
 
             if opt.L1_type == 'origin':
                 self.criterionL1 = torch.nn.L1Loss()
@@ -80,29 +84,29 @@ class DeformablePipe(BaseModel):
                 raise Excption('Unsurportted type of L1!')
             # initialize optimizers
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-            if opt.with_D_PB:
-                self.optimizer_D_PB = torch.optim.Adam(self.netD_PB.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-            if opt.with_D_PP:
-                self.optimizer_D_PP = torch.optim.Adam(self.netD_PP.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            # if opt.with_D_PB:
+            #     self.optimizer_D_PB = torch.optim.Adam(self.netD_PB.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            # if opt.with_D_PP:
+            #     self.optimizer_D_PP = torch.optim.Adam(self.netD_PP.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
             self.optimizers = []
             self.schedulers = []
             self.optimizers.append(self.optimizer_G)
-            if opt.with_D_PB:
-                self.optimizers.append(self.optimizer_D_PB)
-            if opt.with_D_PP:
-                self.optimizers.append(self.optimizer_D_PP)
+            # if opt.with_D_PB:
+            #     self.optimizers.append(self.optimizer_D_PB)
+            # if opt.with_D_PP:
+            #     self.optimizers.append(self.optimizer_D_PP)
             for optimizer in self.optimizers:
                 self.schedulers.append(networks.get_scheduler(optimizer, opt))
 
         print('---------- Networks initialized -------------')
         networks.print_network(self.netG)
-        if self.isTrain:
-            if opt.with_D_PB:
-                networks.print_network(self.netD_PB)
-            if opt.with_D_PP:
-                networks.print_network(self.netD_PP)
-        print('-----------------------------------------------')
+        # if self.isTrain:
+        #     if opt.with_D_PB:
+        #         networks.print_network(self.netD_PB)
+        #     if opt.with_D_PP:
+        #         networks.print_network(self.netD_PP)
+        # print('-----------------------------------------------')
 
     def set_input(self, input):
         input_P1, input_BP1 = input['P1'], input['BP1']
