@@ -24,7 +24,7 @@ def cords_to_map(cords, img_size, sigma=6):
         # result[..., i] = np.where(((yy - point[0]) ** 2 + (xx - point[1]) ** 2) < (sigma ** 2), 1, 0)
     return result
 
-def compute_pose(image_dir, annotations_file, savePath, sigma):
+def compute_pose(image_dir, annotations_file, savePath, sigma=6):
     annotations_file = pd.read_csv(annotations_file, sep=':')
     annotations_file = annotations_file.set_index('name')
     image_size = (256, 176)
