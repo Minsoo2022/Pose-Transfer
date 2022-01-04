@@ -192,6 +192,7 @@ class DeformablePipe(BaseModel):
         #            self.input_BBox2]
 
         self.fake_p2 = pred_img
+        self.fake_p1 = F.grid_sample(pred_textures, source_uv)
 
     def test(self):
         # self.input_P1 = Variable(self.input_P1_set)
@@ -234,12 +235,15 @@ class DeformablePipe(BaseModel):
         #         pair_GANloss = self.loss_G_GAN_PP * self.opt.lambda_GAN
 
         # L1 loss
-        img_loss = self.criterionL1(self.fake_p2, self.input_P2 * self.target_mask)#, self.input_BBox2)
+        img_loss_target = self.criterionL1(self.fake_p2 * self.target_mask, self.input_P2 * self.target_mask)#, self.input_BBox2)
+        img_loss_source = self.criterionL1(self.fake_p1 * self.source_mask, self.input_P1 * self.source_mask)
         coord_loss = self.criterionL1(self.uv_mask * self.source_xy_textures, self.uv_mask * self.xy_inpainted)  # , self.input_BBox2)
-        pair_loss = img_loss+coord_loss
+        pair_loss = img_loss_target + img_loss_source + coord_loss
         pair_loss.backward()
 
-        self.pair_L1loss = img_loss.item()
+        # self.pair_L1loss = img_loss.item()
+        self.img_target_L1loss = img_loss_target.item()
+        self.img_source_L1loss = img_loss_source.item()
         self.coord_loss = coord_loss.item()
         # self.pair_GANloss = pair_GANloss.item()
 
@@ -293,7 +297,8 @@ class DeformablePipe(BaseModel):
 
     def get_current_errors(self):
         # ('pair_L1loss', self.pair_L1loss),
-        ret_errors = OrderedDict([('pair_L1loss', self.pair_L1loss),
+        ret_errors = OrderedDict([('img_target_L1loss', self.img_target_L1loss),
+                                  ('img_source_L1loss', self.img_source_L1loss),
                                   ('coord_loss', self.coord_loss),
                                   ])
 
@@ -320,10 +325,10 @@ class DeformablePipe(BaseModel):
         uv_texture = util.tensor2im(self.uv_texture.data)
         uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
 
-
+        fake_p1 = util.tensor2im(self.fake_p1.data)
         fake_p2 = util.tensor2im(self.fake_p2.data)
 
-        tosave = [input_P1, input_BP1, input_xy, uv_texture, input_P2, input_BP2, inpainted_xy, uv_texture_inpainted, fake_p2]
+        tosave = [input_P1, input_BP1, input_xy, uv_texture, input_P2, input_BP2, inpainted_xy, uv_texture_inpainted, fake_p1, fake_p2]
         vis = np.zeros((height, width * len(tosave), 3)).astype(np.uint8)
 
         for i in range(len(tosave)):
@@ -342,8 +347,8 @@ class DeformablePipe(BaseModel):
 
     def save(self, label):
         self.save_network(self.netG, 'netG', label, self.gpu_ids)
-
-        self.save_network(self.netD_PB, 'netD_PB', label, self.gpu_ids)
-        if self.opt.with_D_PP:
-            self.save_network(self.netD_PP, 'netD_PP', label, self.gpu_ids)
+        #
+        # self.save_network(self.netD_PB, 'netD_PB', label, self.gpu_ids)
+        # if self.opt.with_D_PP:
+        #     self.save_network(self.netD_PP, 'netD_PP', label, self.gpu_ids)
 
