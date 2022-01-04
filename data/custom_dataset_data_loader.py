@@ -11,7 +11,9 @@ def CreateDataset(opt):
     elif opt.dataset_mode == 'key_segments':
         from data.keypoint_part import KeyDataset
         dataset = KeyDataset()
-
+    elif opt.dataset_mode == 'densepose':
+        from data.densepose import KeyDataset
+        dataset = KeyDataset()
     else:
         raise ValueError("Dataset [%s] not recognized." % opt.dataset_mode)
 
