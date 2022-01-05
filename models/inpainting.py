@@ -181,7 +181,9 @@ class DeformablePipe(BaseModel):
         self.xy_inpainted= xy_inpainted
 
         # Warp source image to get RGB textures
-        pred_textures = F.grid_sample(source_fg, xy_inpainted.permute(0, 2, 3, 1))
+        # pred_textures = F.grid_sample(source_fg, xy_inpainted.permute(0, 2, 3, 1))
+        pred_textures = F.grid_sample(source_img, xy_inpainted.permute(0, 2, 3, 1))
+
         self.uv_texture_inpainted= pred_textures
         pred_img = F.grid_sample(pred_textures, target_uv)
         pred_img = pred_img * self.target_mask
