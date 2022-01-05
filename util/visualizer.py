@@ -15,6 +15,7 @@ class Visualizer():
         self.name = opt.name
         self.opt = opt
         self.saved = False
+        self.error_dict = {}
         if self.display_id > 0:
             import visdom
             self.vis = visdom.Visdom(port=opt.display_port)
@@ -121,6 +122,19 @@ class Visualizer():
         print(message)
         with open(self.log_name, "a") as log_file:
             log_file.write('%s\n' % message)
+
+    def validate_current_errors(self, errors, batch_size):
+        for k, v in errors.items():
+            if k not in self.error_dict.keys():
+                self.error_dict[k] = 0
+            self.error_dict[k] += v * batch_size
+
+    def print_validate_errors(self, dataset_size):
+        message = 'validate results'
+        for k, v in self.error_dict.items():
+            message += '%s: %.3f ' % (k, v / dataset_size)
+        print(message)
+
 
     # save image to the disk
     def save_images(self, webpage, visuals, image_path):

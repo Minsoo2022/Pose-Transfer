@@ -22,7 +22,12 @@ class KeyDataset(BaseDataset):
         self.transform = get_transform(opt)
 
     def init_categories(self, pairLst):
-        pairs_file_train = pd.read_csv(pairLst)
+        if self.opt.phase == 'train':
+            pairs_file_train = pd.read_csv(pairLst)
+        elif self.opt.phase == 'test':
+            pairs_file_train = pd.read_csv(pairLst.replace('train', 'test'))
+        else:
+            raise NotImplementedError()
 
         self.size = len(pairs_file_train)
         self.pairs = []
@@ -90,7 +95,7 @@ class KeyDataset(BaseDataset):
 
     def __len__(self):
         if self.opt.phase == 'train':
-            return 4000
+            return self.size
         elif self.opt.phase == 'test':
             return self.size
 

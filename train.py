@@ -1,4 +1,5 @@
 import time
+import copy
 from options.train_options import TrainOptions
 from data.data_loader import CreateDataLoader
 from models.models import create_model
@@ -10,8 +11,15 @@ dataset = data_loader.load_data()
 dataset_size = len(data_loader)
 print('#training images = %d' % dataset_size)
 
+opt_test = copy.deepcopy(opt)
+opt_test.phase = 'test'
+data_loader_test = CreateDataLoader(opt_test)
+dataset_test = data_loader_test.load_data()
+dataset_test_size = len(data_loader_test)
+
 model = create_model(opt)
 visualizer = Visualizer(opt)
+visualizer_test = Visualizer(opt_test)
 total_steps = 0
 
 for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
@@ -19,6 +27,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
     epoch_iter = 0
 
     for i, data in enumerate(dataset):
+        model.train()
         iter_start_time = time.time()
         visualizer.reset()
         total_steps += opt.batchSize
@@ -47,6 +56,28 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
               (epoch, total_steps))
         model.save('latest')
         model.save(epoch)
+
+    if epoch % 1 == 0:
+        test_iter = 0
+        for i, data in enumerate(dataset_test):
+            iter_start_time = time.time()
+            visualizer_test.reset()
+            test_iter += opt_test.batchSize
+            model.eval()
+            model.set_input(data)
+            model.validate()
+
+            errors = model.get_current_errors()
+            t = (time.time() - iter_start_time) / opt_test.batchSize
+            visualizer_test.validate_current_errors(errors, data['P1'].shape[0])
+
+
+        # save_result = total_steps % opt_test.update_html_freq == 0
+        # visualizer_test.display_current_results(model.get_current_visuals(), epoch, save_result)
+
+        visualizer_test.print_validate_errors(len(dataset_test))
+
+
 
     print('End of epoch %d / %d \t Time Taken: %d sec' %
           (epoch, opt.niter + opt.niter_decay, time.time() - epoch_start_time))

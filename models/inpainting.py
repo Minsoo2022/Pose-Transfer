@@ -186,10 +186,10 @@ class DeformablePipe(BaseModel):
         source_uv_mask_flip = (source_uv_mask_flip[:, :1] > 1e-10).float()
 
         source_uv_mask_flip = source_uv_mask_flip.int() - (self.source_uv_mask * source_uv_mask_flip).int()
-        source_uv_mask_flip = source_uv_mask_flip.bool()
-        self.source_uv_mask_union = self.source_uv_mask + source_uv_mask_flip
+        self.source_uv_mask_flip = source_uv_mask_flip.bool()
+        self.source_uv_mask_union = self.source_uv_mask + self.source_uv_mask_flip
 
-        self.source_uv_xy_union = self.source_uv_xy * self.source_uv_mask + self.source_uv_xy_flip * source_uv_mask_flip
+        self.source_uv_xy_union = self.source_uv_xy * self.source_uv_mask + self.source_uv_xy_flip * self.source_uv_mask_flip
 
         source_xy_texture_fg = source_xy_texture * self.source_xy_mask
         self.source_uv_texture , _ = self.sampler(source_xy_texture_fg, source_xy_uv[..., [1, 0]])
@@ -214,6 +214,9 @@ class DeformablePipe(BaseModel):
         # self.fake_p1_flip = F.grid_sample(self.uv_texture_inpainted , source_xy_uv_flip)
         # self.fake_p2_flip = F.grid_sample(self.uv_texture_inpainted , target_xy_uv_flip)
 
+    def validate(self):
+        with torch.no_grad():
+            self.forward()
     # def test(self):
     #     # self.input_P1 = Variable(self.input_P1_set)
     #     # self.input_BP1 = Variable(self.input_BP1_set)
@@ -255,10 +258,13 @@ class DeformablePipe(BaseModel):
         #         pair_GANloss = self.loss_G_GAN_PP * self.opt.lambda_GAN
 
         # L1 loss
-        img_loss_target = self.criterionL1(self.fake_p2 * self.target_xy_mask, self.input_P2 * self.target_xy_mask) #+  self.criterionL1(self.fake_p2_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
-        img_loss_source = self.criterionL1(self.fake_p1 * self.source_xy_mask, self.input_P1 * self.source_xy_mask) #+  self.criterionL1(self.fake_p1_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
-        #coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted)  # , self.input_BBox2)
-        coord_loss = self.criterionL1(self.source_uv_mask_union * self.source_uv_xy_union, self.source_uv_mask_union * self.uv_xy_inpainted)  # , self.input_BBox2)
+        img_loss_target = self.criterionL1(self.fake_p2 * self.target_xy_mask, self.input_P2 * self.target_xy_mask) # + 0.5 * self.criterionL1(self.fake_p2_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
+        img_loss_source = self.criterionL1(self.fake_p1 * self.source_xy_mask, self.input_P1 * self.source_xy_mask) # + 0.5 * self.criterionL1(self.fake_p1_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
+        # coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted)  # , self.input_BBox2)
+        # coord_loss = self.criterionL1(self.source_uv_mask_union * self.source_uv_xy_union, self.source_uv_mask_union * self.uv_xy_inpainted)  # , self.input_BBox2)
+        coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted) \
+                     + 0.5 * self.criterionL1(self.source_uv_mask_flip * self.source_uv_xy_flip, self.source_uv_mask_flip * self.uv_xy_inpainted)
+
         pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + coord_loss * self.opt.lambda_coord
         pair_loss.backward()
 
