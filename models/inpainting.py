@@ -238,7 +238,7 @@ class DeformablePipe(BaseModel):
         img_loss_target = self.criterionL1(self.fake_p2 * self.target_mask, self.input_P2 * self.target_mask)#, self.input_BBox2)
         img_loss_source = self.criterionL1(self.fake_p1 * self.source_mask, self.input_P1 * self.source_mask)
         coord_loss = self.criterionL1(self.uv_mask * self.source_xy_textures, self.uv_mask * self.xy_inpainted)  # , self.input_BBox2)
-        pair_loss = img_loss_target + img_loss_source + coord_loss
+        pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + coord_loss * self.opt.lambda_coord
         pair_loss.backward()
 
         # self.pair_L1loss = img_loss.item()
