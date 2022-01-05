@@ -112,8 +112,8 @@ class DeformablePipe(BaseModel):
         print('-----------------------------------------------')
 
     def set_input(self, input):
-        self.input_P1, self.input_BP1 = input['P1'], input['BP1']
-        self.input_P2, self.input_BP2 = input['P2'], input['BP2']
+        self.input_P1, self.input_BP1, self.input_BP1_flip = input['P1'], input['BP1'], input['BP1_flip']
+        self.input_P2, self.input_BP2, self.input_BP2_flip = input['P2'], input['BP2'], input['BP2_flip']
 
         # self.input_P1_set.resize_(input_P1.size()).copy_(input_P1)
         # self.input_BP1_set.resize_(input_BP1.size()).copy_(input_BP1)
@@ -131,14 +131,17 @@ class DeformablePipe(BaseModel):
             self.input_BP1 = self.input_BP1.cuda()
             self.input_P2 = self.input_P2.cuda()
             self.input_BP2 = self.input_BP2.cuda()
+            self.input_BP1_flip = self.input_BP1_flip.cuda()
+            self.input_BP2_flip = self.input_BP2_flip.cuda()
             #self.input_BBox1 = self.input_BBox1.cuda()
             #self.input_BBox2 = self.input_BBox1.cuda()
 
 
         source_mask = torch.logical_not(torch.isnan(self.input_BP1)).sum(dim=1) > 0
         target_mask = torch.logical_not(torch.isnan(self.input_BP2)).sum(dim=1) > 0
-        self.source_mask = source_mask.float().unsqueeze(1)
-        self.target_mask = target_mask.float().unsqueeze(1)
+
+        self.source_xy_mask = source_mask.float().unsqueeze(1)
+        self.target_xy_mask = target_mask.float().unsqueeze(1)
 
 
     def forward(self):
@@ -150,66 +153,91 @@ class DeformablePipe(BaseModel):
         #
         # self.input_BBox1 = Variable(self.input_BBox1_set)
         # self.input_BBox2 = Variable(self.input_BBox2_set)
-        source_uv = self.input_BP1.permute(0, 2, 3, 1)
-        target_uv = self.input_BP2.permute(0, 2, 3, 1)
-        source_img = self.input_P1
+
+        # source_uv -> source_xy_uv
+        # target_uv -> target_xy_uv
+        # source_img -> source_xy_texture
+        # source_holes -> source_uv_mask
+        # source_xy_textures -> source_uv_xy
+
+        # pred_textures -> uv_texture_inpainted
+        # pred_img -> target_xy_texture_pred
+
+
+        source_xy_uv = self.input_BP1.permute(0, 2, 3, 1)
+        source_xy_uv_flip = self.input_BP1_flip.permute(0, 2, 3, 1)
+        target_xy_uv = self.input_BP2.permute(0, 2, 3, 1)
+        source_xy_texture = self.input_P1
 
 
         # Replace NaNs with out-of-image coordinates
-        source_uv[torch.isnan(source_uv)] = -10
-        target_uv[torch.isnan(target_uv)] = -10
+        source_xy_uv[torch.isnan(source_xy_uv)] = -10
+        target_xy_uv[torch.isnan(target_xy_uv)] = -10
+
+        source_xy_uv_flip[torch.isnan(source_xy_uv_flip)] = -10
 
         # Get xy textures
-        N, _, H, W = source_uv.shape
+        N, _, H, W = source_xy_uv.shape
         meshgrid = make_meshgrid(self.H, self.W, device=self.device)
         meshgrid = torch.stack([meshgrid] * N, dim=0)
 
-        source_xy_textures, _ = self.sampler(meshgrid, source_uv[..., [1, 0]])
-        self.source_xy_textures= source_xy_textures
+        source_uv_xy, source_uv_mask = self.sampler(meshgrid, source_xy_uv[..., [1, 0]])
+        self.source_uv_xy= source_uv_xy
+        source_uv_mask = (source_uv_mask[:, :1] > 1e-10).float()
 
-        source_fg = source_img * self.source_mask
-        source_textures, source_holes = self.sampler(source_fg, source_uv[..., [1, 0]])
+        source_uv_xy_flip, source_uv_mask_flip = self.sampler(meshgrid, source_xy_uv_flip[..., [1, 0]])
+        self.source_uv_xy_flip = source_uv_xy_flip
+        source_uv_mask_flip = (source_uv_mask_flip[:, :1] > 1e-10).float()
 
-        source_holes = (source_holes[:, :1] > 1e-10).float()
-        self.uv_mask=source_holes
-        self.uv_texture= source_textures
+        source_uv_mask_flip = source_uv_mask_flip.int() - (source_uv_mask * source_uv_mask_flip).int()
+        source_uv_mask_flip = source_uv_mask_flip.bool()
+        source_uv_mask_union = source_uv_mask + source_uv_mask_flip
+
+        source_uv_xy_union = source_uv_xy * source_uv_mask + source_uv_xy_flip * source_uv_mask_flip
+        self.source_uv_xy_union = source_uv_xy_union
+
+        source_xy_texture_fg = source_xy_texture * self.source_xy_mask
+        source_uv_texture, _ = self.sampler(source_xy_texture_fg, source_xy_uv[..., [1, 0]])
+
+        self.source_uv_mask = source_uv_mask
+        self.source_uv_texture = source_uv_texture
 
         # Inpaint xy textures
-        inp_in = torch.cat([source_xy_textures, source_holes[:, :1], meshgrid], dim=1)
+        # inp_in = torch.cat([source_uv_xy, source_uv_mask[:, :1], meshgrid], dim=1)
+        inp_in = torch.cat([source_uv_xy_union, source_uv_mask_union[:, :1], meshgrid], dim=1)
 
-        xy_inpainted = torch.tanh(self.netG(inp_in))
-        self.xy_inpainted= xy_inpainted
+        uv_xy_inpainted = torch.tanh(self.netG(inp_in))
+        self.uv_xy_inpainted= uv_xy_inpainted
 
         # Warp source image to get RGB textures
-        pred_textures = F.grid_sample(source_fg, xy_inpainted.permute(0, 2, 3, 1))
-        self.uv_texture_inpainted= pred_textures
-        pred_img = F.grid_sample(pred_textures, target_uv)
-        pred_img = pred_img * self.target_mask
+        uv_texture_inpainted = F.grid_sample(source_xy_texture_fg, uv_xy_inpainted.permute(0, 2, 3, 1))
+        self.uv_texture_inpainted = uv_texture_inpainted
+        target_xy_texture_pred = F.grid_sample(uv_texture_inpainted, target_xy_uv)
 
         # G_input = [self.input_P1,
         #            torch.cat((self.input_BP1, self.input_BP2), 1),
         #            self.input_BBox1,
         #            self.input_BBox2]
 
-        self.fake_p2 = pred_img
-        self.fake_p1 = F.grid_sample(pred_textures, source_uv)
+        self.fake_p2 = target_xy_texture_pred
+        self.fake_p1 = F.grid_sample(uv_texture_inpainted, source_xy_uv)
 
-    def test(self):
-        # self.input_P1 = Variable(self.input_P1_set)
-        # self.input_BP1 = Variable(self.input_BP1_set)
-        #
-        # self.input_P2 = Variable(self.input_P2_set)
-        # self.input_BP2 = Variable(self.input_BP2_set)
-        #
-        # self.input_BBox1 = Variable(self.input_BBox1_set)
-        # self.input_BBox2 = Variable(self.input_BBox2_set)
-
-        G_input = [self.input_P1,
-                   torch.cat((self.input_BP1, self.input_BP2), 1),
-                   self.input_BBox1,
-                   self.input_BBox2]
-
-        self.fake_p2 = self.netG(G_input)
+    # def test(self):
+    #     # self.input_P1 = Variable(self.input_P1_set)
+    #     # self.input_BP1 = Variable(self.input_BP1_set)
+    #     #
+    #     # self.input_P2 = Variable(self.input_P2_set)
+    #     # self.input_BP2 = Variable(self.input_BP2_set)
+    #     #
+    #     # self.input_BBox1 = Variable(self.input_BBox1_set)
+    #     # self.input_BBox2 = Variable(self.input_BBox2_set)
+    #
+    #     G_input = [self.input_P1,
+    #                torch.cat((self.input_BP1, self.input_BP2), 1),
+    #                self.input_BBox1,
+    #                self.input_BBox2]
+    #
+    #     self.fake_p2 = self.netG(G_input)
 
     # get image paths
     def get_image_paths(self):
@@ -235,9 +263,9 @@ class DeformablePipe(BaseModel):
         #         pair_GANloss = self.loss_G_GAN_PP * self.opt.lambda_GAN
 
         # L1 loss
-        img_loss_target = self.criterionL1(self.fake_p2 * self.target_mask, self.input_P2 * self.target_mask)#, self.input_BBox2)
-        img_loss_source = self.criterionL1(self.fake_p1 * self.source_mask, self.input_P1 * self.source_mask)
-        coord_loss = self.criterionL1(self.uv_mask * self.source_xy_textures, self.uv_mask * self.xy_inpainted)  # , self.input_BBox2)
+        img_loss_target = self.criterionL1(self.fake_p2 * self.target_xy_mask, self.input_P2 * self.target_xy_mask)#, self.input_BBox2)
+        img_loss_source = self.criterionL1(self.fake_p1 * self.source_xy_mask, self.input_P1 * self.source_xy_mask)
+        coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted)  # , self.input_BBox2)
         pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + coord_loss * self.opt.lambda_coord
         pair_loss.backward()
 
@@ -320,19 +348,32 @@ class DeformablePipe(BaseModel):
 
         input_BP1 = util.tensor2im(torch.cat([self.input_BP1.data,padding_zero],dim=1))
         input_BP2 = util.tensor2im(torch.cat([self.input_BP2.data,padding_zero],dim=1))
-        input_xy = util.tensor2im(torch.cat([self.source_xy_textures.data,padding_zero],dim=1))
-        inpainted_xy = util.tensor2im(torch.cat([self.xy_inpainted.data, padding_zero], dim=1))
-        uv_texture = util.tensor2im(self.uv_texture.data)
+        source_uv_xy = util.tensor2im(torch.cat([self.source_uv_xy.data, padding_zero],dim=1))
+        source_uv_xy_flip = util.tensor2im(torch.cat([self.source_uv_xy_flip.data, padding_zero], dim=1))
+        source_uv_xy_union = util.tensor2im(torch.cat([self.source_uv_xy_union.data, padding_zero], dim=1))
+        uv_xy_inpainted = util.tensor2im(torch.cat([self.uv_xy_inpainted.data, padding_zero], dim=1))
+        source_uv_texture = util.tensor2im(self.source_uv_texture.data)
         uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
 
         fake_p1 = util.tensor2im(self.fake_p1.data)
         fake_p2 = util.tensor2im(self.fake_p2.data)
 
-        tosave = [input_P1, input_BP1, input_xy, uv_texture, input_P2, input_BP2, inpainted_xy, uv_texture_inpainted, fake_p1, fake_p2]
-        vis = np.zeros((height, width * len(tosave), 3)).astype(np.uint8)
+        tosave = [input_P1, input_BP1, source_uv_xy, source_uv_texture, source_uv_xy_flip, source_uv_xy_union,
 
-        for i in range(len(tosave)):
-            vis[:, i*width:(i+1)*width, :] = tosave[i]
+                  input_P2, input_BP2,
+
+                  uv_xy_inpainted, uv_texture_inpainted, fake_p1, fake_p2]
+
+        # vis = np.zeros((height, width * len(tosave), 3)).astype(np.uint8)
+
+        nrow = 2
+        vis = np.zeros((height * nrow, width * len(tosave), 3)).astype(np.uint8)
+        for i in range(nrow):
+            for j in len(tosave) % nrow:
+                vis[i*height: (i+1)*height, j*width:(j+1)*width, :] = tosave[i*nrow + j]
+
+        # for i in range(len(tosave)):
+        #     vis[:, i*width:(i+1)*width, :] = tosave[i]
 
         # vis = np.zeros((height, width * 5, 3)).astype(np.uint8)  # h, w, c
         # vis[:, :width, :] = input_P1
