@@ -159,7 +159,6 @@ class DeformablePipe(BaseModel):
         # source_img -> source_xy_texture
         # source_holes -> source_uv_mask
         # source_xy_textures -> source_uv_xy
-
         # pred_textures -> uv_texture_inpainted
         # pred_img -> target_xy_texture_pred
 
@@ -167,13 +166,12 @@ class DeformablePipe(BaseModel):
         source_xy_uv = self.input_BP1.permute(0, 2, 3, 1)
         source_xy_uv_flip = self.input_BP1_flip.permute(0, 2, 3, 1)
         target_xy_uv = self.input_BP2.permute(0, 2, 3, 1)
-        source_xy_texture = self.input_P1
 
+        source_xy_texture = self.input_P1
 
         # Replace NaNs with out-of-image coordinates
         source_xy_uv[torch.isnan(source_xy_uv)] = -10
         target_xy_uv[torch.isnan(target_xy_uv)] = -10
-
         source_xy_uv_flip[torch.isnan(source_xy_uv_flip)] = -10
 
         # Get xy textures
@@ -181,46 +179,40 @@ class DeformablePipe(BaseModel):
         meshgrid = make_meshgrid(self.H, self.W, device=self.device)
         meshgrid = torch.stack([meshgrid] * N, dim=0)
 
-        source_uv_xy, source_uv_mask = self.sampler(meshgrid, source_xy_uv[..., [1, 0]])
-        self.source_uv_xy= source_uv_xy
-        source_uv_mask = (source_uv_mask[:, :1] > 1e-10).float()
+        self.source_uv_xy, source_uv_mask = self.sampler(meshgrid, source_xy_uv[..., [1, 0]])
+        self.source_uv_mask = (source_uv_mask[:, :1] > 1e-10).float()
 
-        source_uv_xy_flip, source_uv_mask_flip = self.sampler(meshgrid, source_xy_uv_flip[..., [1, 0]])
-        self.source_uv_xy_flip = source_uv_xy_flip
+        self.source_uv_xy_flip, source_uv_mask_flip = self.sampler(meshgrid, source_xy_uv_flip[..., [1, 0]])
         source_uv_mask_flip = (source_uv_mask_flip[:, :1] > 1e-10).float()
 
-        source_uv_mask_flip = source_uv_mask_flip.int() - (source_uv_mask * source_uv_mask_flip).int()
+        source_uv_mask_flip = source_uv_mask_flip.int() - (self.source_uv_mask * source_uv_mask_flip).int()
         source_uv_mask_flip = source_uv_mask_flip.bool()
-        source_uv_mask_union = source_uv_mask + source_uv_mask_flip
+        self.source_uv_mask_union = self.source_uv_mask + source_uv_mask_flip
 
-        source_uv_xy_union = source_uv_xy * source_uv_mask + source_uv_xy_flip * source_uv_mask_flip
-        self.source_uv_xy_union = source_uv_xy_union
+        self.source_uv_xy_union = self.source_uv_xy * self.source_uv_mask + self.source_uv_xy_flip * source_uv_mask_flip
 
         source_xy_texture_fg = source_xy_texture * self.source_xy_mask
-        source_uv_texture, _ = self.sampler(source_xy_texture_fg, source_xy_uv[..., [1, 0]])
-
-        self.source_uv_mask = source_uv_mask
-        self.source_uv_texture = source_uv_texture
+        self.source_uv_texture , _ = self.sampler(source_xy_texture_fg, source_xy_uv[..., [1, 0]])
 
         # Inpaint xy textures
         # inp_in = torch.cat([source_uv_xy, source_uv_mask[:, :1], meshgrid], dim=1)
-        inp_in = torch.cat([source_uv_xy_union, source_uv_mask_union[:, :1], meshgrid], dim=1)
+        inp_in = torch.cat([self.source_uv_xy_union, self.source_uv_mask_union[:, :1], meshgrid], dim=1)
 
-        uv_xy_inpainted = torch.tanh(self.netG(inp_in))
-        self.uv_xy_inpainted= uv_xy_inpainted
+        self.uv_xy_inpainted = torch.tanh(self.netG(inp_in))
 
         # Warp source image to get RGB textures
-        uv_texture_inpainted = F.grid_sample(source_xy_texture_fg, uv_xy_inpainted.permute(0, 2, 3, 1))
-        self.uv_texture_inpainted = uv_texture_inpainted
-        target_xy_texture_pred = F.grid_sample(uv_texture_inpainted, target_xy_uv)
+        #self.uv_texture_inpainted  = F.grid_sample(source_xy_texture_fg, self.uv_xy_inpainted.permute(0, 2, 3, 1))
+        self.uv_texture_inpainted = F.grid_sample(source_xy_texture, self.uv_xy_inpainted.permute(0, 2, 3, 1))
 
-        # G_input = [self.input_P1,
-        #            torch.cat((self.input_BP1, self.input_BP2), 1),
-        #            self.input_BBox1,
-        #            self.input_BBox2]
+        self.fake_p2 = F.grid_sample(self.uv_texture_inpainted , target_xy_uv)
+        self.fake_p1 = F.grid_sample(self.uv_texture_inpainted, source_xy_uv)
 
-        self.fake_p2 = target_xy_texture_pred
-        self.fake_p1 = F.grid_sample(uv_texture_inpainted, source_xy_uv)
+
+        ###
+        # target_xy_uv_flip = self.input_BP2_flip.permute(0, 2, 3, 1)
+        # target_xy_uv_flip[torch.isnan(target_xy_uv_flip)] = -10
+        # self.fake_p1_flip = F.grid_sample(self.uv_texture_inpainted , source_xy_uv_flip)
+        # self.fake_p2_flip = F.grid_sample(self.uv_texture_inpainted , target_xy_uv_flip)
 
     # def test(self):
     #     # self.input_P1 = Variable(self.input_P1_set)
@@ -263,9 +255,10 @@ class DeformablePipe(BaseModel):
         #         pair_GANloss = self.loss_G_GAN_PP * self.opt.lambda_GAN
 
         # L1 loss
-        img_loss_target = self.criterionL1(self.fake_p2 * self.target_xy_mask, self.input_P2 * self.target_xy_mask)#, self.input_BBox2)
-        img_loss_source = self.criterionL1(self.fake_p1 * self.source_xy_mask, self.input_P1 * self.source_xy_mask)
-        coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted)  # , self.input_BBox2)
+        img_loss_target = self.criterionL1(self.fake_p2 * self.target_xy_mask, self.input_P2 * self.target_xy_mask) #+  self.criterionL1(self.fake_p2_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
+        img_loss_source = self.criterionL1(self.fake_p1 * self.source_xy_mask, self.input_P1 * self.source_xy_mask) #+  self.criterionL1(self.fake_p1_flip * self.target_xy_mask, self.input_P2 * self.target_xy_mask)
+        #coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted)  # , self.input_BBox2)
+        coord_loss = self.criterionL1(self.source_uv_mask_union * self.source_uv_xy_union, self.source_uv_mask_union * self.uv_xy_inpainted)  # , self.input_BBox2)
         pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + coord_loss * self.opt.lambda_coord
         pair_loss.backward()
 
@@ -364,16 +357,17 @@ class DeformablePipe(BaseModel):
 
                   uv_xy_inpainted, uv_texture_inpainted, fake_p1, fake_p2]
 
-        # vis = np.zeros((height, width * len(tosave), 3)).astype(np.uint8)
 
-        nrow = 2
-        vis = np.zeros((height * nrow, width * len(tosave), 3)).astype(np.uint8)
-        for i in range(nrow):
-            for j in len(tosave) % nrow:
-                vis[i*height: (i+1)*height, j*width:(j+1)*width, :] = tosave[i*nrow + j]
 
-        # for i in range(len(tosave)):
-        #     vis[:, i*width:(i+1)*width, :] = tosave[i]
+        # nrow = 2
+        # vis = np.zeros((height * nrow, width * len(tosave), 3)).astype(np.uint8)
+        # for i in range(nrow):
+        #     for j in range(len(tosave) % nrow):
+        #         vis[i*height: (i+1)*height, j*width:(j+1)*width, :] = tosave[i*nrow + j]
+
+        vis = np.zeros((height, width * len(tosave), 3)).astype(np.uint8)
+        for i in range(len(tosave)):
+            vis[:, i*width:(i+1)*width, :] = tosave[i]
 
         # vis = np.zeros((height, width * 5, 3)).astype(np.uint8)  # h, w, c
         # vis[:, :width, :] = input_P1
