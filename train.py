@@ -4,6 +4,7 @@ from options.train_options import TrainOptions
 from data.data_loader import CreateDataLoader
 from models.models import create_model
 from util.visualizer import Visualizer
+import wandb
 
 opt = TrainOptions().parse()
 data_loader = CreateDataLoader(opt)
@@ -21,6 +22,7 @@ model = create_model(opt)
 visualizer = Visualizer(opt)
 visualizer_test = Visualizer(opt_test)
 total_steps = 0
+model.init_wandb()
 
 for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
     epoch_start_time = time.time()
@@ -72,8 +74,12 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
             visualizer_test.validate_current_errors(errors, data['P1'].shape[0])
 
 
-        # save_result = total_steps % opt_test.update_html_freq == 0
-        # visualizer_test.display_current_results(model.get_current_visuals(), epoch, save_result)
+            if test_iter % opt_test.update_html_freq == 0:
+                save_dict = {}
+                for k, v in model.get_current_visuals().items():
+                    save_dict['val_' + k] = wandb.Image(v)
+                wandb.log(save_dict)
+
 
         visualizer_test.print_validate_errors(len(dataset_test))
 

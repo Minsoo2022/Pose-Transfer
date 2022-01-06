@@ -4,7 +4,7 @@ import ntpath
 import time
 from . import util
 from . import html
-
+import wandb
 
 class Visualizer():
     def __init__(self, opt):
@@ -33,16 +33,23 @@ class Visualizer():
     def reset(self):
         self.saved = False
 
+
+
     # |visuals|: dictionary of images to display or save
     def display_current_results(self, visuals, epoch, save_result):
+        image_dict = {}
+        for k, v in visuals.items():
+            image_dict[k] = wandb.Image(v)
+        wandb.log(image_dict)
+
         if self.display_id > 0:  # show images in the browser
             ncols = self.opt.display_single_pane_ncols
             if ncols > 0:
                 h, w = next(iter(visuals.values())).shape[:2]
                 table_css = """<style>
-                        table {border-collapse: separate; border-spacing:4px; white-space:nowrap; text-align:center}
-                        table td {width: %dpx; height: %dpx; padding: 4px; outline: 4px solid black}
-                        </style>""" % (w, h)
+                           table {border-collapse: separate; border-spacing:4px; white-space:nowrap; text-align:center}
+                           table td {width: %dpx; height: %dpx; padding: 4px; outline: 4px solid black}
+                           </style>""" % (w, h)
                 title = self.name
                 label_html = ''
                 label_html_row = ''
@@ -56,7 +63,7 @@ class Visualizer():
                     if idx % ncols == 0:
                         label_html += '<tr>%s</tr>' % label_html_row
                         label_html_row = ''
-                white_image = np.ones_like(image_numpy.transpose([2, 0, 1]))*255
+                white_image = np.ones_like(image_numpy.transpose([2, 0, 1])) * 255
                 while idx % ncols != 0:
                     images.append(white_image)
                     label_html_row += '<td></td>'
@@ -123,17 +130,25 @@ class Visualizer():
         with open(self.log_name, "a") as log_file:
             log_file.write('%s\n' % message)
 
+        wandb.log(errors)
+
     def validate_current_errors(self, errors, batch_size):
         for k, v in errors.items():
             if k not in self.error_dict.keys():
                 self.error_dict[k] = 0
             self.error_dict[k] += v * batch_size
 
+
     def print_validate_errors(self, dataset_size):
         message = 'validate results'
         for k, v in self.error_dict.items():
             message += '%s: %.3f ' % (k, v / dataset_size)
         print(message)
+
+        save_dict = {}
+        for k, v in self.error_dict.items():
+            save_dict['val_' + k] = v
+        wandb.log( save_dict)
 
 
     # save image to the disk

@@ -7,6 +7,8 @@ from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
 from .src import dp, grid_sampler
+import wandb
+import os
 # losses
 from losses.SegmentsStyleLoss import SegmentsSeperateStyleLoss
 
@@ -213,11 +215,15 @@ class DeformablePipe(BaseModel):
         # target_xy_uv_flip[torch.isnan(target_xy_uv_flip)] = -10
         # self.fake_p1_flip = F.grid_sample(self.uv_texture_inpainted , source_xy_uv_flip)
         # self.fake_p2_flip = F.grid_sample(self.uv_texture_inpainted , target_xy_uv_flip)
+        self.source_uv_texture_union = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_union.permute(0, 2, 3, 1)) * self.source_uv_mask_union
+        self.source_uv_texture_flip = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_flip.permute(0, 2, 3, 1)) * self.source_uv_mask_flip
 
     def validate(self):
         with torch.no_grad():
             self.forward()
-    # def test(self):
+    def test(self):
+        with torch.no_grad():
+            self.forward()
     #     # self.input_P1 = Variable(self.input_P1_set)
     #     # self.input_BP1 = Variable(self.input_BP1_set)
     #     #
@@ -354,14 +360,15 @@ class DeformablePipe(BaseModel):
         source_uv_texture = util.tensor2im(self.source_uv_texture.data)
         uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
 
+        source_uv_texture_union = util.tensor2im(self.source_uv_texture_union.data)
+        source_uv_texture_flip = util.tensor2im(self.source_uv_texture_flip.data)
+
         fake_p1 = util.tensor2im(self.fake_p1.data)
         fake_p2 = util.tensor2im(self.fake_p2.data)
 
-        tosave = [input_P1, input_BP1, source_uv_xy, source_uv_texture, source_uv_xy_flip, source_uv_xy_union,
+        tosave = [input_P1, source_uv_xy, source_uv_texture, source_uv_xy_flip, source_uv_texture_flip, source_uv_xy_union, source_uv_texture_union,
 
-                  input_P2, input_BP2,
-
-                  uv_xy_inpainted, uv_texture_inpainted, fake_p1, fake_p2]
+                  uv_xy_inpainted, uv_texture_inpainted, input_BP1, fake_p1,input_BP2,fake_p2,  input_P2]
 
 
 
@@ -392,4 +399,43 @@ class DeformablePipe(BaseModel):
         # self.save_network(self.netD_PB, 'netD_PB', label, self.gpu_ids)
         # if self.opt.with_D_PP:
         #     self.save_network(self.netD_PP, 'netD_PP', label, self.gpu_ids)
+
+    def init_wandb(self,):
+        self.use_wandb= True
+        if self.use_wandb:
+            config_dict = {}
+            # for key, value in self.configs.items():
+            #     config_dict[str(key)] = value
+            id = wandb.util.generate_id()
+            with open(self.opt.checkpoints_dir+"wandb_id.txt", 'w') as file:
+                file.write(id)
+
+            config_dict['wandb_id'] = id
+            config_dict['wandb_run_name'] = self.opt.name
+            wandb.init(
+                entity='fasker_research',  # davian-nerf',
+                project='inpainting_stage1',  # project name
+                id=id,
+                resume="allow",
+                config=config_dict,
+            )
+            wandb.run.name = self.opt.name
+            # resume_path = ""
+            # if len(self.configs['experiment']['resume_folder']) > 0:
+            #     resume_path = Path(f"{self.configs['experiment']['exp_dir']}").parent
+            #     resume_path = f"{resume_path}/{self.configs['experiment']['resume_folder']}/wandb_id.txt"
+            #
+            # if len(resume_path) > 0 and Path(f"{resume_path}").exists():
+            #     print(f"Resume experiment from {resume_path}")
+            #     with open(f"{resume_path}", 'r') as file:
+            #         id = file.readline()
+            # else:
+            #     id = wandb.util.generate_id()
+
+
+            # ### Resume from experiment without wandb_id
+            # if (len(self.configs['experiment']['resume_folder']) > 0 and not Path(f"{self.configs['experiment']['resume_folder']}/wandb_id.txt").exists()):
+            #     wandb.run.name = f"{self.configs['wandb']['wandb_run_name']}_(resume{self.configs['experiment']['resume_folder']})"
+            # elif self.configs['wandb']['wandb_run_name'] is not None:   ##Start new experiment
+            #         wandb.run.name = self.configs['wandb']['wandb_run_name']
 
