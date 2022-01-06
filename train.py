@@ -61,6 +61,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
     if epoch % 1 == 0:
         test_iter = 0
+        visualizer_test.val_error_init()
         for i, data in enumerate(dataset_test):
             iter_start_time = time.time()
             visualizer_test.reset()

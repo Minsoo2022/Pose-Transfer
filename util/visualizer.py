@@ -138,6 +138,8 @@ class Visualizer():
                 self.error_dict[k] = 0
             self.error_dict[k] += v * batch_size
 
+    def val_error_init(self):
+        self.error_dict = {}
 
     def print_validate_errors(self, dataset_size):
         message = 'validate results'
