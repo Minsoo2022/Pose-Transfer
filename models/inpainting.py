@@ -407,7 +407,7 @@ class DeformablePipe(BaseModel):
             # for key, value in self.configs.items():
             #     config_dict[str(key)] = value
             id = wandb.util.generate_id()
-            with open(self.opt.checkpoints_dir+self.opt.name+"/wandb_id.txt", 'w') as file:
+            with open(self.opt.checkpoints_dir+"/"+self.opt.name+"/wandb_id.txt", 'w') as file:
                 file.write(id)
 
             config_dict['wandb_id'] = id
