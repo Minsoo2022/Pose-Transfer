@@ -14,6 +14,9 @@ def CreateDataset(opt):
     elif opt.dataset_mode == 'densepose':
         from data.densepose import KeyDataset
         dataset = KeyDataset()
+    elif opt.dataset_mode == 'densepose_wopair':
+        from data.densepose import KeyDataset_wopair
+        dataset = KeyDataset_wopair()
     else:
         raise ValueError("Dataset [%s] not recognized." % opt.dataset_mode)
 

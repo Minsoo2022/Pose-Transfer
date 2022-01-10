@@ -239,6 +239,77 @@ class DeformablePipe(BaseModel):
     #                self.input_BBox2]
     #
     #     self.fake_p2 = self.netG(G_input)
+    def test_wopair(self, input):
+
+        self.H = self.W=512
+
+        self.input_P1, self.input_BP1, self.input_BP1_flip = input['P1'], input['BP1'], input['BP1_flip']
+        if len(self.gpu_ids) > 0:
+            self.input_P1 = self.input_P1.cuda()
+            self.input_BP1 = self.input_BP1.cuda()
+            self.input_BP1_flip = self.input_BP1_flip.cuda()
+
+        source_mask = torch.logical_not(torch.isnan(self.input_BP1)).sum(dim=1) > 0
+        self.source_xy_mask = source_mask.float().unsqueeze(1)
+
+        ##forward
+        source_xy_uv = self.input_BP1.permute(0, 2, 3, 1)
+        source_xy_uv_flip = self.input_BP1_flip.permute(0, 2, 3, 1)
+
+        source_xy_texture = self.input_P1
+
+        # Replace NaNs with out-of-image coordinates
+        source_xy_uv[torch.isnan(source_xy_uv)] = -10
+        source_xy_uv_flip[torch.isnan(source_xy_uv_flip)] = -10
+
+        # Get xy textures
+        N, _, H, W = source_xy_uv.shape
+        meshgrid = make_meshgrid(self.H, self.W, device=self.device)
+        meshgrid = torch.stack([meshgrid] * N, dim=0)
+
+        self.source_uv_xy, source_uv_mask = self.sampler(meshgrid, source_xy_uv[..., [1, 0]])
+        self.source_uv_mask = (source_uv_mask[:, :1] > 1e-10).float()
+
+        self.source_uv_xy_flip, source_uv_mask_flip = self.sampler(meshgrid, source_xy_uv_flip[..., [1, 0]])
+        source_uv_mask_flip = (source_uv_mask_flip[:, :1] > 1e-10).float()
+
+        source_uv_mask_flip = source_uv_mask_flip.int() - (self.source_uv_mask * source_uv_mask_flip).int()
+        self.source_uv_mask_flip = source_uv_mask_flip.bool()
+        self.source_uv_mask_union = self.source_uv_mask + self.source_uv_mask_flip
+
+        self.source_uv_xy_union = self.source_uv_xy * self.source_uv_mask + self.source_uv_xy_flip * self.source_uv_mask_flip
+
+
+        source_xy_texture_fg = source_xy_texture * self.source_xy_mask
+        self.source_uv_texture, _ = self.sampler(source_xy_texture_fg, source_xy_uv[..., [1, 0]])
+
+        # Inpaint xy textures
+        # inp_in = torch.cat([source_uv_xy, source_uv_mask[:, :1], meshgrid], dim=1)
+        inp_in = torch.cat([self.source_uv_xy_union, self.source_uv_mask_union[:, :1], meshgrid], dim=1)
+
+        self.uv_xy_inpainted = torch.tanh(self.netG(inp_in))
+
+        # Warp source image to get RGB textures
+        # self.uv_texture_inpainted  = F.grid_sample(source_xy_texture_fg, self.uv_xy_inpainted.permute(0, 2, 3, 1))
+        self.uv_texture_inpainted = F.grid_sample(source_xy_texture, self.uv_xy_inpainted.permute(0, 2, 3, 1))
+
+        self.fake_p1 = F.grid_sample(self.uv_texture_inpainted, source_xy_uv)
+
+        ## set tensor to image
+        input_P1 = util.tensor2im(self.input_P1.data)
+        padding_zero = torch.zeros_like(self.input_BP1.data)[:, :1, :, :]
+        input_BP1 = util.tensor2im(torch.cat([self.input_BP1.data, padding_zero], dim=1))
+        source_uv_xy = util.tensor2im(torch.cat([self.source_uv_xy.data, padding_zero], dim=1))
+        source_uv_xy_flip = util.tensor2im(torch.cat([self.source_uv_xy_flip.data, padding_zero], dim=1))
+        source_uv_xy_union = util.tensor2im(torch.cat([self.source_uv_xy_union.data, padding_zero], dim=1))
+        uv_xy_inpainted = util.tensor2im(torch.cat([self.uv_xy_inpainted.data, padding_zero], dim=1))
+        source_uv_texture = util.tensor2im(self.source_uv_texture.data)
+        uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
+        fake_p1 = util.tensor2im(self.fake_p1.data)
+
+        ret_visuals = OrderedDict([('vis', uv_xy_inpainted)])
+        return ret_visuals
+
 
     # get image paths
     def get_image_paths(self):

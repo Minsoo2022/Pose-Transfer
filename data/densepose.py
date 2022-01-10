@@ -101,3 +101,66 @@ class KeyDataset(BaseDataset):
 
     def name(self):
         return 'KeyDataset'
+
+
+import glob
+
+class KeyDataset_wopair(BaseDataset):
+    def initialize(self, opt):
+        self.opt = opt
+        self.root = opt.dataroot
+        self.dir_P = os.path.join(opt.dataroot, 'color')  # person images
+        self.dir_K = os.path.join(opt.dataroot,  'densepose') # keypoints
+        self.dir_K_flip = os.path.join(opt.dataroot, 'densepose_flip') # keypoints
+
+        self.transform = get_transform(opt)
+
+
+        self.data_P = sorted(
+                glob.glob(os.path.join(f'{self.dir_P}', "*.jpg"))
+            )
+
+        self.data_K = sorted(
+            glob.glob(os.path.join(f'{self.dir_K}', "*.npy"))
+        )
+        self.data_K_flip = sorted(
+            glob.glob(os.path.join(f'{self.dir_K_flip}', "*.npy"))
+        )
+
+        self.size = len(self.data_P)
+
+
+    def __getitem__(self, index):
+
+        P1_path = self.data_P[index]
+        P1_name = P1_path[-8:]
+        BP1_path = self.data_K[index]
+        BP1_flip_path = self.data_K_flip[index]
+        # person 2 and its bone
+
+        P1_img = Image.open(P1_path).convert('RGB')
+
+
+        BP1_img = np.load(BP1_path)  # h, w, c
+        BP1 = torch.from_numpy(BP1_img).float()  # h, w, c
+        BP1 = BP1.transpose(2, 0)  # c,w,h
+        BP1 = BP1.transpose(2, 1)  # c,h,w
+
+
+        BP1_flip_img = np.load(BP1_flip_path)  # h, w, c
+        BP1_flip = torch.from_numpy(BP1_flip_img).float()  # h, w, c
+        BP1_flip = BP1_flip.transpose(2, 0)  # c,w,h
+        BP1_flip = BP1_flip.transpose(2, 1)  # c,h,w
+
+
+        P1 = self.transform(P1_img)
+
+
+        return {'P1': P1, 'BP1': BP1,
+                'BP1_flip': BP1_flip,'P1_path': P1_name}
+
+    def __len__(self):
+        return self.size
+
+    def name(self):
+        return 'KeyDataset_wopair'
