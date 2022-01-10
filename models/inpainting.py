@@ -410,10 +410,10 @@ class DeformablePipe(BaseModel):
             rg_loss = torch.stack(rg_loss).sum(dim=0).sum(dim=1).mean()
             cg_loss = grad_col(coor, 256, self.masks)
             cg_loss = torch.stack(cg_loss).sum(dim=0).sum(dim=1).mean()
-            rg_loss = torch.max(rg_loss, torch.tensor(1.).cuda())
-            cg_loss = torch.max(cg_loss, torch.tensor(1.).cuda())
-            rx, ry, cx, cy = torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda() \
-                , torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda()
+            rg_loss = torch.max(rg_loss, torch.tensor(0.02).cuda())
+            cg_loss = torch.max(cg_loss, torch.tensor(0.02).cuda())
+            rx, ry, cx, cy = torch.tensor(0.0005).cuda(), torch.tensor(0.0005).cuda() \
+                , torch.tensor(0.0005).cuda(), torch.tensor(0.0005).cuda()
             row_x, row_y = row[:, :, 0], row[:, :, 1]
             col_x, col_y = col[:, :, 0], col[:, :, 1]
             rx_loss = torch.max(rx, row_x).mean()
