@@ -27,6 +27,7 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--lambda_target', type=float, default=1.0, help='weight of style loss')
         self.parser.add_argument('--lambda_source', type=float, default=1.0, help='weight of style loss')
         self.parser.add_argument('--lambda_coord', type=float, default=1.0, help='weight of style loss')
+        self.parser.add_argument('--lambda_constraint', type=float, default=0, help='weight of style loss')
         self.parser.add_argument('--coord_loss_decay', action='store_true', help='decay coordinate loss lambda')
 
         self.parser.add_argument('--pool_size', type=int, default=50, help='the size of image buffer that stores previously generated images')
