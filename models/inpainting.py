@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision.transforms import ToTensor, Resize
+from PIL import Image
 from collections import OrderedDict
 import util.util as util
 from util.image_pool import ImagePool
@@ -11,6 +13,52 @@ import wandb
 import os
 # losses
 from losses.SegmentsStyleLoss import SegmentsSeperateStyleLoss
+
+def get_row(coor, num, masks):
+    results = []
+    temp = coor.reshape(-1, num, num, 2)
+    sub1 = (temp[:, :, 1:] - temp[:, :, :-1]) ** 2
+    sub2 = torch.abs(sub1[:, :, 1:] - sub1[:, :, :-1])
+    for mask in masks:
+        sub2_ = sub2 * (mask[:,:,1:-1][..., None].repeat(1,1,1,2))
+        sub2_ = sub2_.reshape(-1, num * (num - 2), 2)
+        results.append(sub2_)
+    return results
+
+def get_col(coor, num, masks):
+    results = []
+    temp = coor.reshape(-1, num, num, 2)
+    sub1 = (temp[:, 1:, :] - temp[:, :-1, :]) ** 2
+    sub2 = torch.abs(sub1[:, 1:, :] - sub1[:, :-1, :])
+    for mask in masks:
+        sub2_ = sub2 * (mask[:, 1:-1, :][..., None].repeat(1, 1, 1, 2))
+        sub2_ = sub2_.permute(0, 2, 1, 3).reshape(-1, num * (num - 2), 2)
+        results.append(sub2_)
+    return results
+
+def grad_row(coor, num, masks):
+    results = []
+    temp = coor.reshape([-1, num, num, 2])
+    sub1 = (temp[:, :, 1:-1] - temp[:, :, :-2])
+    sub2 = (temp[:, :, 1:-1] - temp[:, :, 2:])
+    sub3 = torch.abs(sub1[:, :, :, 1] * sub2[:, :, :, 0] - sub2[:, :, :, 1] * sub1[:, :, :, 0])
+    for mask in masks:
+        sub3_ = sub3 * (mask[:, :, 1:-1])
+        sub3_ = sub3_.reshape(-1, num * (num - 2))
+        results.append(sub3_)
+    return results # sub3.sum(1).mean()
+
+def grad_col(coor, num, masks):
+    results = []
+    temp = coor.reshape([-1, num, num, 2])
+    sub1 = (temp[:, 1:-1, :] - temp[:, :-2, :])
+    sub2 = (temp[:, 1:-1, :] - temp[:, 2:, :])
+    sub3 = torch.abs(sub1[:, :, :, 1] * sub2[:, :, :, 0] - sub2[:, :, :, 1] * sub1[:, :, :, 0])
+    for mask in masks:
+        sub3_ = sub3 * (mask[:, 1:-1, :])
+        sub3_ = sub3_.reshape(-1, num * (num - 2))
+        results.append(sub3_)
+    return results # sub3.sum(1).mean()
 
 def make_meshgrid(H, W, device='cuda:0'):
     x = torch.arange(0, W).to(device)
@@ -44,6 +92,13 @@ class DeformablePipe(BaseModel):
         input_nc = [opt.P_input_nc, opt.BP_input_nc + opt.BP_input_nc]
         self.netG = dp.GatedHourglass(32, 5, 2).cuda(self.gpu_ids[0])
         self.sampler = grid_sampler.InvGridSamplerDecomposed(return_B=True, hole_fill_color=0.).cuda(self.gpu_ids[0])
+
+        self.masks = []
+        to_tensor = ToTensor()
+        resize = Resize(256, interpolation=0)
+        for i in range(1, 7):
+            mask = to_tensor(resize(Image.open(f'./masks/mask{i}.png')))[:1]
+            self.masks.append(mask.cuda(self.device))
         # self.netG = networks.define_G(input_nc, opt.P_input_nc,
         #                               opt.ngf, opt.which_model_netG, opt.norm, not opt.no_dropout, opt.init_type,
         #                               self.gpu_ids,
@@ -342,13 +397,42 @@ class DeformablePipe(BaseModel):
         coord_loss = self.criterionL1(self.source_uv_mask * self.source_uv_xy, self.source_uv_mask * self.uv_xy_inpainted) \
                      + 0.5 * self.criterionL1(self.source_uv_mask_flip * self.source_uv_xy_flip, self.source_uv_mask_flip * self.uv_xy_inpainted)
 
-        pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + coord_loss * self.opt.lambda_coord
+
+        # coor = theta.view(inputA.shape[0], -1, 2)
+        if self.opt.lambda_source > 0:
+            coor = self.uv_xy_inpainted.permute(0,2,3,1)
+            coor = coor.reshape(coor.shape[0], coor.shape[1] * coor.shape[2], coor.shape[3])
+            row = get_row(coor, 256, self.masks)
+            row = torch.stack(row).sum(dim=0)
+            col = get_col(coor, 256, self.masks)
+            col = torch.stack(col).sum(dim=0)
+            rg_loss = grad_row(coor, 256, self.masks)
+            rg_loss = torch.stack(rg_loss).sum(dim=0).sum(dim=1).mean()
+            cg_loss = grad_col(coor, 256, self.masks)
+            cg_loss = torch.stack(cg_loss).sum(dim=0).sum(dim=1).mean()
+            rg_loss = torch.max(rg_loss, torch.tensor(1.).cuda())
+            cg_loss = torch.max(cg_loss, torch.tensor(1.).cuda())
+            rx, ry, cx, cy = torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda() \
+                , torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda()
+            row_x, row_y = row[:, :, 0], row[:, :, 1]
+            col_x, col_y = col[:, :, 0], col[:, :, 1]
+            rx_loss = torch.max(rx, row_x).mean()
+            ry_loss = torch.max(ry, row_y).mean()
+            cx_loss = torch.max(cx, col_x).mean()
+            cy_loss = torch.max(cy, col_y).mean()
+            constraint_loss = rg_loss + cg_loss + rx_loss + ry_loss + cx_loss + cy_loss
+        else:
+            constraint_loss = 0
+
+        pair_loss = img_loss_target * self.opt.lambda_target + img_loss_source * self.opt.lambda_source + \
+                    coord_loss * self.opt.lambda_coord + constraint_loss * self.opt.lambda_constraint
         pair_loss.backward()
 
         # self.pair_L1loss = img_loss.item()
         self.img_target_L1loss = img_loss_target.item()
         self.img_source_L1loss = img_loss_source.item()
         self.coord_loss = coord_loss.item()
+        self.constraint_loss = constraint_loss.item()
         # self.pair_GANloss = pair_GANloss.item()
 
     # def backward_D_basic(self, netD, real, fake):
@@ -404,6 +488,7 @@ class DeformablePipe(BaseModel):
         ret_errors = OrderedDict([('img_target_L1loss', self.img_target_L1loss),
                                   ('img_source_L1loss', self.img_source_L1loss),
                                   ('coord_loss', self.coord_loss),
+                                  ('constraint_loss', self.constraint_loss)
                                   ])
 
         # ret_errors['origin_L1'] = self.loss_originL1
