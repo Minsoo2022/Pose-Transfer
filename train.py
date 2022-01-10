@@ -7,6 +7,7 @@ from util.visualizer import Visualizer
 import wandb
 
 opt = TrainOptions().parse()
+opt.lambda_coord_ori = opt.lambda_coord
 data_loader = CreateDataLoader(opt)
 dataset = data_loader.load_data()
 dataset_size = len(data_loader)
@@ -27,6 +28,10 @@ model.init_wandb()
 for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
     epoch_start_time = time.time()
     epoch_iter = 0
+
+    if opt.coord_loss_decay:
+        num = min(20, max(10, epoch))
+        opt.lambda_coord = opt.lambda_coord_ori * (1 - (num-10) / 10)
 
     for i, data in enumerate(dataset):
         model.train()
