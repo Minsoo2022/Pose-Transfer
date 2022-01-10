@@ -15,6 +15,7 @@ print('#training images = %d' % dataset_size)
 
 opt_test = copy.deepcopy(opt)
 opt_test.phase = 'test'
+opt_test.serial_batch = True
 data_loader_test = CreateDataLoader(opt_test)
 dataset_test = data_loader_test.load_data()
 dataset_test_size = len(data_loader_test)

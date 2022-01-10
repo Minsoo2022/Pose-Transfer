@@ -362,7 +362,7 @@ class DeformablePipe(BaseModel):
         uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
         fake_p1 = util.tensor2im(self.fake_p1.data)
 
-        ret_visuals = OrderedDict([('vis', uv_xy_inpainted)])
+        ret_visuals = OrderedDict([('uv_xy_inpainted', uv_xy_inpainted), ('uv_texture_inpainted', uv_texture_inpainted)])
         return ret_visuals
 
 
