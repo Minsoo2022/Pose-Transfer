@@ -249,6 +249,14 @@ class ThumanDataset(BaseDataset):
         P1 = self.transform(P1_img)
         P2 = self.transform(P2_img)
 
+        if self.opt.fineSize != BP1_img.shape[0]:
+            BP1 = F.interpolate(BP1[None], (self.opt.fineSize, self.opt.fineSize))[0]
+            BP1_flip = F.interpolate(BP1_flip[None], (self.opt.fineSize, self.opt.fineSize))[0]
+
+            BP2 = F.interpolate(BP2[None], (self.opt.fineSize, self.opt.fineSize))[0]
+            BP2_flip = F.interpolate(BP2_flip[None], (self.opt.fineSize, self.opt.fineSize))[0]
+
+
         return {'P1': P1, 'BP1': BP1,
                 'BP1_flip': BP1_flip,
                 'P2': P2, 'BP2': BP2,
