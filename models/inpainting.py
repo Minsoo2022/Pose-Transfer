@@ -91,7 +91,7 @@ class DeformablePipe(BaseModel):
         self.num_of_Goutput = 1
         self.device = f"cuda:{self.gpu_ids[0]}"
         input_nc = [opt.P_input_nc, opt.BP_input_nc + opt.BP_input_nc]
-        self.netG = dp.GatedHourglass(32, 5, 2).cuda(self.gpu_ids[0])
+        self.netG = dp.GatedHourglass(32, 11, 2).cuda(self.gpu_ids[0])
         self.sampler = grid_sampler.InvGridSamplerDecomposed(return_B=True, hole_fill_color=0.).cuda(self.gpu_ids[0])
 
         self.masks = []
@@ -254,7 +254,10 @@ class DeformablePipe(BaseModel):
 
         # Inpaint xy textures
         # inp_in = torch.cat([source_uv_xy, source_uv_mask[:, :1], meshgrid], dim=1)
-        inp_in = torch.cat([self.source_uv_xy_union, self.source_uv_mask_union[:, :1], meshgrid], dim=1)
+        self.source_uv_texture_union = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_union.permute(0, 2, 3, 1)) * self.source_uv_mask_union
+        self.source_uv_texture_flip = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_flip.permute(0, 2, 3, 1)) * self.source_uv_mask_flip
+
+        inp_in = torch.cat([self.source_uv_xy_union, self.source_uv_mask_union[:, :1], self.source_uv_texture_union, source_xy_texture, meshgrid], dim=1)
 
         self.uv_xy_inpainted = torch.tanh(self.netG(inp_in))
 
@@ -271,8 +274,7 @@ class DeformablePipe(BaseModel):
         # target_xy_uv_flip[torch.isnan(target_xy_uv_flip)] = -10
         # self.fake_p1_flip = F.grid_sample(self.uv_texture_inpainted , source_xy_uv_flip)
         # self.fake_p2_flip = F.grid_sample(self.uv_texture_inpainted , target_xy_uv_flip)
-        self.source_uv_texture_union = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_union.permute(0, 2, 3, 1)) * self.source_uv_mask_union
-        self.source_uv_texture_flip = F.grid_sample(source_xy_texture_fg, self.source_uv_xy_flip.permute(0, 2, 3, 1)) * self.source_uv_mask_flip
+
 
     def validate(self):
         with torch.no_grad():
