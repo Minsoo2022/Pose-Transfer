@@ -164,3 +164,95 @@ class KeyDataset_wopair(BaseDataset):
 
     def name(self):
         return 'KeyDataset_wopair'
+
+
+
+class ThumanDataset(BaseDataset):
+    def initialize(self, opt):
+        self.opt = opt
+        self.root = opt.dataroot
+
+        #dataroot is Thuman/image_data/
+        self.dir_P = os.path.join(opt.dataroot, '*','color')  # person images
+        self.dir_K = os.path.join(opt.dataroot, '*', 'densepose') # keypoints
+        self.dir_K_flip = os.path.join(opt.dataroot, '*','densepose_flip') # keypoints
+
+        self.transform = get_transform(opt)
+
+        self.samples =  sorted(
+                glob.glob(os.path.join(opt.dataroot, '*'))
+            )
+        self.size = 400 #len(self.samples)
+
+        # self.data_P = sorted(
+        #         glob.glob(os.path.join(f'{self.dir_P}', "*.jpg"))
+        #     )
+        # self.data_K = sorted(
+        #     glob.glob(os.path.join(f'{self.dir_K}', "*.npy"))
+        # )
+        # self.data_K_flip = sorted(
+        #     glob.glob(os.path.join(f'{self.dir_K_flip}', "*.npy"))
+        # )
+
+
+
+    def __getitem__(self, index):
+        sample_path = self.samples[index]
+        #dir_path = os.path.dirname(sample_path)
+        color_paths = sorted(glob.glob(os.path.join(sample_path, 'color', "*.jpg")))
+        densepose_paths = sorted(glob.glob(os.path.join(sample_path, 'densepose', "*.npy")))
+        densepose_flip_paths = sorted(glob.glob(os.path.join(sample_path, 'densepose_flip', "*.npy")))
+
+
+        image_num_list =  list(range(360))
+        random.shuffle(image_num_list)
+        image_num1 = image_num_list[0]
+        image_num2 = image_num_list[1]
+        P1_name = os.path.basename(color_paths[image_num1])
+        P2_name = os.path.basename(color_paths[image_num2])
+        P1_path = color_paths[image_num1]
+        BP1_path = densepose_paths[image_num1]
+        BP1_flip_path = densepose_flip_paths[image_num1]
+        P2_path = color_paths[image_num2]
+        BP2_path = densepose_paths[image_num2]
+        BP2_flip_path = densepose_flip_paths[image_num2]
+
+
+        P1_img = Image.open(P1_path).convert('RGB')
+        P2_img = Image.open(P2_path).convert('RGB')
+
+        BP1_img = np.load(BP1_path)  # h, w, c
+        BP2_img = np.load(BP2_path)
+
+        BP1 = torch.from_numpy(BP1_img).float()  # h, w, c
+        BP1 = BP1.transpose(2, 0)  # c,w,h
+        BP1 = BP1.transpose(2, 1)  # c,h,w
+
+        BP2 = torch.from_numpy(BP2_img).float()
+        BP2 = BP2.transpose(2, 0)  # c,w,h
+        BP2 = BP2.transpose(2, 1)  # c,h,w
+
+        BP1_flip_img = np.load(BP1_flip_path)  # h, w, c
+        BP2_flip_img = np.load(BP2_flip_path)
+
+        BP1_flip = torch.from_numpy(BP1_flip_img).float()  # h, w, c
+        BP1_flip = BP1_flip.transpose(2, 0)  # c,w,h
+        BP1_flip = BP1_flip.transpose(2, 1)  # c,h,w
+
+        BP2_flip = torch.from_numpy(BP2_flip_img).float()
+        BP2_flip = BP2_flip.transpose(2, 0)  # c,w,h
+        BP2_flip = BP2_flip.transpose(2, 1)  # c,h,w
+
+        P1 = self.transform(P1_img)
+        P2 = self.transform(P2_img)
+
+        return {'P1': P1, 'BP1': BP1,
+                'BP1_flip': BP1_flip,
+                'P2': P2, 'BP2': BP2,
+                'BP2_flip': BP2_flip,
+                'P1_path': P1_name, 'P2_path': P2_name}
+    def __len__(self):
+        return self.size
+
+    def name(self):
+        return 'Thuman'

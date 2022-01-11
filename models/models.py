@@ -12,7 +12,7 @@ def create_model(opt):
         from .PATN_Fine import TransferModel
         model = TransferModel()
     elif opt.model == 'inpainting':
-        assert opt.dataset_mode == 'densepose' or 'densepose_wopair'
+        assert opt.dataset_mode == 'densepose' or 'densepose_wopair' or 'thuman'
         from .inpainting import DeformablePipe
         model = DeformablePipe()
 

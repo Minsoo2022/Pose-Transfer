@@ -17,6 +17,9 @@ def CreateDataset(opt):
     elif opt.dataset_mode == 'densepose_wopair':
         from data.densepose import KeyDataset_wopair
         dataset = KeyDataset_wopair()
+    elif opt.dataset_mode == 'thuman':
+        from data.densepose import ThumanDataset
+        dataset = ThumanDataset()
     else:
         raise ValueError("Dataset [%s] not recognized." % opt.dataset_mode)
 
