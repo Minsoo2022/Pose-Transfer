@@ -8,7 +8,7 @@ import random
 import pandas as pd
 import numpy as np
 import torch
-
+from torch.nn import functional as F
 
 class KeyDataset(BaseDataset):
     def initialize(self, opt):
@@ -152,6 +152,9 @@ class KeyDataset_wopair(BaseDataset):
         BP1_flip = BP1_flip.transpose(2, 0)  # c,w,h
         BP1_flip = BP1_flip.transpose(2, 1)  # c,h,w
 
+        if self.opt.fineSize != BP1_img.shape[0]:
+            BP1 = F.interpolate(BP1[None], (self.opt.fineSize, self.opt.fineSize))[0]
+            BP1_flip = F.interpolate(BP1_flip[None], (self.opt.fineSize, self.opt.fineSize))[0]
 
         P1 = self.transform(P1_img)
 

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision.transforms import ToTensor, Resize
+from torchvision.utils import save_image
 from PIL import Image
 from collections import OrderedDict
 import util.util as util
@@ -77,8 +78,8 @@ class DeformablePipe(BaseModel):
         return 'DeformablePipe'
 
     def initialize(self, opt):
-        self.H = 256 # 나중에 opt에서 받도록
-        self.W = 256
+        self.H = opt.fineSize
+        self.W = opt.fineSize
         BaseModel.initialize(self, opt)
         self.phase = opt.phase
         # self.input_P1_set = self.Tensor(nb, opt.P_input_nc, size, size)
@@ -296,7 +297,6 @@ class DeformablePipe(BaseModel):
     #     self.fake_p2 = self.netG(G_input)
     def test_wopair(self, input):
 
-        self.H = self.W=512
 
         self.input_P1, self.input_BP1, self.input_BP1_flip = input['P1'], input['BP1'], input['BP1_flip']
         if len(self.gpu_ids) > 0:
@@ -362,7 +362,7 @@ class DeformablePipe(BaseModel):
         uv_texture_inpainted = util.tensor2im(self.uv_texture_inpainted.data)
         fake_p1 = util.tensor2im(self.fake_p1.data)
 
-        ret_visuals = OrderedDict([('uv_xy_inpainted', uv_xy_inpainted), ('uv_texture_inpainted', uv_texture_inpainted)])
+        ret_visuals = OrderedDict([('uv_xy_inpainted', self.uv_xy_inpainted.data), ('uv_texture_inpainted', self.uv_texture_inpainted.data)])
         return ret_visuals
 
 
@@ -410,10 +410,10 @@ class DeformablePipe(BaseModel):
             rg_loss = torch.stack(rg_loss).sum(dim=0).sum(dim=1).mean()
             cg_loss = grad_col(coor, 256, self.masks)
             cg_loss = torch.stack(cg_loss).sum(dim=0).sum(dim=1).mean()
-            rg_loss = torch.max(rg_loss, torch.tensor(1.).cuda())
-            cg_loss = torch.max(cg_loss, torch.tensor(1.).cuda())
-            rx, ry, cx, cy = torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda() \
-                , torch.tensor(0.08).cuda(), torch.tensor(0.08).cuda()
+            rg_loss = torch.max(rg_loss, torch.tensor(0.02).cuda())
+            cg_loss = torch.max(cg_loss, torch.tensor(0.02).cuda())
+            rx, ry, cx, cy = torch.tensor(0.0005).cuda(), torch.tensor(0.0005).cuda() \
+                , torch.tensor(0.0005).cuda(), torch.tensor(0.0005).cuda()
             row_x, row_y = row[:, :, 0], row[:, :, 1]
             col_x, col_y = col[:, :, 0], col[:, :, 1]
             rx_loss = torch.max(rx, row_x).mean()
